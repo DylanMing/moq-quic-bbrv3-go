@@ -24,35 +24,77 @@ This MOQT library currently supports WebTransport and QUIC Protocols.
 | BBRv1 | 原始 BBR 算法 | ✅ 支持 |
 | Cubic | TCP Cubic 拥塞控制 | ✅ 支持 |
 
-### 统计日志功能
+---
 
-支持实时输出 QUIC 连接统计和拥塞控制统计信息。
+## 快速开始
+
+### 1. 配置证书
+
+```bash
+cd moq-go
+make cert
+```
+
+### 2. 构建项目
+
+```bash
+# 构建 relay
+make relaysource
+
+# 构建 publisher
+make pubsource
+
+# 构建 subscriber
+make subsource
+```
+
+### 3. 运行测试
+
+需要**三个终端**分别运行以下命令：
+
+**终端 1 - 启动 Relay：**
+```bash
+cd moq-go
+go run examples/relay/relay.go
+```
+
+**终端 2 - 启动 Subscriber（订阅者）：**
+```bash
+# 使用 BBRv3（默认）
+make sub
+
+# 或指定拥塞控制算法和启用统计
+cd examples/newsub
+go run newsub.go -congestion=bbr3 -stats
+
+# 其他选项：
+# -congestion=bbr1   # 使用 BBRv1
+# -congestion=cubic   # 使用 Cubic
+# -stats              # 启用统计日志
+# -debug              # 启用调试日志
+```
+
+**终端 3 - 启动 Publisher（发布者）：**
+```bash
+# 使用 BBRv3（默认）
+make pub
+
+# 或指定拥塞控制算法和启用统计
+cd examples/newpub
+go run newpub.go -congestion=bbr3 -stats
+
+# 其他选项：
+# -congestion=bbr1   # 使用 BBRv1
+# -congestion=cubic   # 使用 Cubic
+# -stats              # 启用统计日志
+# -debug              # 启用调试日志
+```
 
 ---
 
-## 使用方法
+## 命令行参数
 
-### 快速开始
-
-```bash
-# 1. 配置自签名证书
-make cert
-
-# 2. 启动 Relay
-make relay
-
-# 3. 启动 Subscriber（启用统计）
-cd examples/newsub
-go run newsub.go -stats -congestion=bbr3
-
-# 4. 启动 Publisher（启用统计）
-cd examples/newpub
-go run newpub.go -stats -congestion=bbr3
-```
-
-### 命令行参数
-
-#### newpub / newsub 参数
+### newpub / newsub 参数
 
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
@@ -60,17 +102,29 @@ go run newpub.go -stats -congestion=bbr3
 | `-stats` | bool | false | 启用统计日志输出 |
 | `-congestion` | string | "bbr3" | 拥塞控制算法：cubic / bbr1 / bbr3 |
 
-#### 示例
+### 使用示例
 
 ```bash
-# 使用 BBRv1
+# BBRv1 测试（带统计）
+cd examples/newsub
+go run newsub.go -congestion=bbr1 -stats
+
+cd examples/newpub
 go run newpub.go -congestion=bbr1 -stats
 
-# 使用 Cubic
+# Cubic 测试（带统计）
+cd examples/newsub
 go run newsub.go -congestion=cubic -stats
 
-# 调试模式
-go run newpub.go -debug
+cd examples/newpub
+go run newpub.go -congestion=cubic -stats
+
+# BBRv3 测试（带统计）
+cd examples/newsub
+go run newsub.go -congestion=bbr3 -stats
+
+cd examples/newpub
+go run newpub.go -congestion=bbr3 -stats
 ```
 
 ### 日志输出
@@ -93,9 +147,8 @@ go run newpub.go -debug
 
 ### 1. 配置拥塞控制算法
 
-通过 `quic.Config.Congestion` 注入：
-
 ```go
+import "github.com/DineshAdhi/moq-go/moqt"
 import "github.com/quic-go/quic-go"
 
 options := moqt.DialerOptions{
@@ -129,71 +182,11 @@ time.Sleep(30 * time.Second)
 statsLogger.Stop()
 ```
 
-### 3. 自定义日志格式
-
-```go
-customLogFunc := func(stats moqt.ConnectionStats) {
-    log.Info().
-        Str("min_rtt", stats.MinRTT.String()).
-        Uint64("sent", stats.PacketsSent).
-        Msg("Custom Stats")
-}
-
-statsLogger := moqt.NewStatsLoggerWithCallback(pub, 1*time.Second, customLogFunc)
-statsLogger.Start()
-```
-
 ---
 
 ## 接口变更说明
 
-### 新增接口
-
-#### ConnectionStatsProvider 接口
-```go
-type ConnectionStatsProvider interface {
-    GetConnectionStats() ConnectionStats
-}
-```
-
-#### ConnectionStats 数据结构
-```go
-type ConnectionStats struct {
-    MinRTT        time.Duration
-    LatestRTT     time.Duration
-    SmoothedRTT   time.Duration
-    PacketsSent   uint64
-    PacketsLost   uint64
-}
-```
-
-#### CongestionStatsProvider 接口
-```go
-type CongestionStatsProvider interface {
-    GetCongestionStats() CongestionStats
-}
-```
-
-#### CongestionStats 数据结构
-```go
-type CongestionStats struct {
-    CongestionWindow uint64
-    PacingRate      uint64
-    BytesInFlight   uint64
-    TotalBytesSent  uint64
-    TotalBytesLost  uint64
-    MaxBandwidth    uint64
-    State           string
-    InRecovery      bool
-    InSlowStart     bool
-    PacingGain      float64
-    CwndGain        float64
-}
-```
-
-### 新增函数
-
-#### quic-go 包（quic-go/interface.go）
+### 新增函数（quic-go/interface.go）
 
 ```go
 // 创建 BBRv1 拥塞控制算法
@@ -206,14 +199,11 @@ func NewBBRv3(conf *Config) SendAlgorithmWithDebugInfos
 func NewCubic(conf *Config) SendAlgorithmWithDebugInfos
 ```
 
-#### moqt 包（moqt/stats.go）
+### 新增统计模块（moqt/stats.go）
 
 ```go
 // 创建连接统计日志器
 func NewStatsLogger(provider ConnectionStatsProvider, interval time.Duration) *StatsLogger
-
-// 创建带自定义回调的统计日志器
-func NewStatsLoggerWithCallback(provider ConnectionStatsProvider, interval time.Duration, logFunc func(stats ConnectionStats)) *StatsLogger
 
 // 格式化字节数
 func FormatBytes(b uint64) string
@@ -224,17 +214,11 @@ func FormatBandwidth(bps uint64) string
 
 ### 新增方法
 
-#### MOQTSession（moqt/moqtsession.go）
-
 ```go
-// 获取 QUIC 连接统计
+// MOQTSession
 func (s *MOQTSession) GetConnectionStats() ConnectionStats
-```
 
-#### MOQPub / MOQSub（moqt/api/pub.go, sub.go）
-
-```go
-// 获取连接统计（已实现 ConnectionStatsProvider 接口）
+// MOQPub / MOQSub
 func (pub *MOQPub) GetConnectionStats() ConnectionStats
 func (sub *MOQSub) GetConnectionStats() ConnectionStats
 ```
@@ -243,13 +227,11 @@ func (sub *MOQSub) GetConnectionStats() ConnectionStats
 
 1. **BBRv3 HasPacingBudget 死锁问题**
    - 文件：`quic-go-bbr/internal/congestion/bbrv3.go`
-   - 问题：条件 `return deliveryRate < float64(b.pacingRate)*b.pacingGain` 永远为 false
-   - 修复：改为 `return true`
+   - 修复：`HasPacingBudget()` 改为 `return true`
 
 2. **CubicSender nil 指针问题**
    - 文件：`quic-go-bbr/internal/congestion/cubic_sender.go`
-   - 问题：`BandwidthEstimate()`、`MaybeExitSlowStart()`、`maybeIncreaseCwnd()` 未检查 `rttStats` 是否为 nil
-   - 修复：添加 nil 检查
+   - 修复：`BandwidthEstimate()`、`MaybeExitSlowStart()`、`maybeIncreaseCwnd()` 添加 nil 检查
 
 ---
 
@@ -257,27 +239,44 @@ func (sub *MOQSub) GetConnectionStats() ConnectionStats
 
 ```
 moq-go/
+├── Makefile                 # 构建命令
 ├── moqt/
-│   ├── stats.go              # 统计日志模块
-│   ├── moqtsession.go        # MOQ 会话管理
-│   ├── moqtdialer.go         # MOQ 拨号器（默认 BBRv3）
+│   ├── stats.go            # 统计日志模块
+│   ├── moqtsession.go      # MOQ 会话管理
+│   ├── moqtdialer.go       # MOQ 拨号器（默认 BBRv3）
 │   └── api/
-│       ├── pub.go            # 发布者 API
-│       └── sub.go            # 订阅者 API
+│       ├── pub.go          # 发布者 API
+│       └── sub.go          # 订阅者 API
 ├── examples/
-│   ├── relay/                # Relay 示例
-│   ├── newpub/               # Publisher 示例（支持 -stats -congestion）
-│   └── newsub/               # Subscriber 示例（支持 -stats -congestion）
+│   ├── relay/              # Relay 示例
+│   ├── pub/                # Publisher 示例（make pub）
+│   ├── sub/                # Subscriber 示例（make sub）
+│   ├── newpub/             # Publisher 示例（支持 -stats -congestion）
+│   └── newsub/             # Subscriber 示例（支持 -stats -congestion）
 ├── docs/
-│   ├── TEST_GUIDE.md         # 测试指导文档
+│   ├── TEST_GUIDE.md       # 测试指导文档
 │   └── SECONDARY_DEVELOPMENT_GUIDE.md  # 二次开发文档
-└── quic-go/                  # QUIC 协议实现（集成 BBR）
-    ├── interface.go          # 拥塞控制接口（新增 NewBBRv1/NewBBRv3/NewCubic）
+└── quic-go/                # QUIC 协议实现（集成 BBR）
+    ├── interface.go        # 拥塞控制接口
     └── internal/congestion/
-        ├── bbrv3.go          # BBRv3 实现（已修复死锁）
-        ├── bbrv1.go          # BBRv1 实现
-        └── cubic_sender.go   # Cubic 实现（已修复 nil 问题）
+        ├── bbrv3.go       # BBRv3 实现
+        ├── bbrv1.go       # BBRv1 实现
+        └── cubic_sender.go # Cubic 实现
 ```
+
+---
+
+## Makefile 命令
+
+| 命令 | 说明 |
+|------|------|
+| `make cert` | 生成自签名证书 |
+| `make relaysource` | 构建 relay |
+| `make pubsource` | 构建 publisher |
+| `make subsource` | 构建 subscriber |
+| `make relay` | 运行 relay |
+| `make pub` | 运行 publisher（默认） |
+| `make sub` | 运行 subscriber（默认） |
 
 ---
 
@@ -285,17 +284,5 @@ moq-go/
 
 - [测试指导文档](docs/TEST_GUIDE.md) - 测试环境搭建、测试用例、测试流程
 - [二次开发文档](docs/SECONDARY_DEVELOPMENT_GUIDE.md) - API 接口、集成示例、错误处理
-
----
-
-## Setup
-
-- Configure Self-Signed Certificates by calling ```make cert```
-- Implementations of Relay, Publisher and Subscriber are configured in the `examples` folder.
-- You can run them using the make commands
-
-    - `make relay`
-    - `make sub`
-    - `make pub`
 
 ---

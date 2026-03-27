@@ -3,17 +3,15 @@ package main
 import (
 	"flag"
 	"fmt"
+	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"path/filepath"
 	"strconv"
 	"time"
 
 	"github.com/DineshAdhi/moq-go/moqt"
-
 	"github.com/DineshAdhi/moq-go/moqt/api"
-
-	"net/http"
-	_ "net/http/pprof"
 
 	"github.com/quic-go/quic-go"
 	"github.com/rs/zerolog"
@@ -24,6 +22,9 @@ const PORT = 4443
 
 var ALPNS = []string{"h3", "moq-00"} // Application Layer Protocols ["H3" - WebTransport]
 
+var defaultCertPath = "examples/certs/localhost.crt"
+var defaultKeyPath = "examples/certs/localhost.key"
+
 func main() {
 	// defer profile.Start(profile.ProfilePath("."), profile.GoroutineProfile, profile.MemProfileHeap, profile.CPUProfile).Stop()
 
@@ -31,13 +32,10 @@ func main() {
 		http.ListenAndServe(":8080", nil)
 	}()
 
-	ENVCERTPATH := os.Getenv("MOQT_CERT_PATH")
-	ENVKEYPATH := os.Getenv("MOQT_KEY_PATH")
-
 	debug := flag.Bool("debug", false, "sets log level to debug")
 	port := flag.Int("port", PORT, "Listening Port")
-	KEYPATH := flag.String("keypath", ENVKEYPATH, "Keypath")
-	CERTPATH := flag.String("certpath", ENVCERTPATH, "CertPath")
+	KEYPATH := flag.String("keypath", defaultKeyPath, "Keypath")
+	CERTPATH := flag.String("certpath", defaultCertPath, "CertPath")
 	flag.Parse()
 
 	LISTENADDR := fmt.Sprintf("0.0.0.0:%d", *port)
