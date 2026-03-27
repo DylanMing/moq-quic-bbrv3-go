@@ -53,6 +53,9 @@ func main() {
 
 	quicConfig := &quic.Config{
 		EnableDatagrams: true,
+		Congestion: func() quic.SendAlgorithmWithDebugInfos {
+        return quic.NewBBRv3WithStatsV2(nil, quic.DefaultStatsConfig(quic.AlgorithmBBRv3, "relay"))
+    },
 	}
 
 	Options := moqt.ListenerOptions{

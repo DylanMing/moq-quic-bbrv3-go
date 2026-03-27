@@ -47,7 +47,9 @@ func main() {
           KeepAlivePeriod: 1 * time.Second,
           EnableDatagrams: true,
           MaxIdleTimeout:  60 * time.Second,
-          Congestion: nil,
+             Congestion: func() quic.SendAlgorithmWithDebugInfos {
+                return quic.NewBBRv3WithStatsV2(nil, quic.DefaultStatsConfig(quic.AlgorithmBBRv3, "newsub"))
+             },
        },
        InsecureSkipVerify: true,
     }
