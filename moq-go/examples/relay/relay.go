@@ -31,14 +31,12 @@ func main() {
 		http.ListenAndServe(":8080", nil)
 	}()
 
-	ENVCERTPATH := os.Getenv("MOQT_CERT_PATH")
-	ENVKEYPATH := os.Getenv("MOQT_KEY_PATH")
-
 	debug := flag.Bool("debug", false, "sets log level to debug")
 	port := flag.Int("port", PORT, "Listening Port")
-	KEYPATH := flag.String("keypath", ENVKEYPATH, "Keypath")
-	CERTPATH := flag.String("certpath", ENVCERTPATH, "CertPath")
 	flag.Parse()
+
+	CERTPATH := "cert.pem"
+	KEYPATH := "key.pem"
 
 	LISTENADDR := fmt.Sprintf("0.0.0.0:%d", *port)
 
@@ -59,8 +57,8 @@ func main() {
 
 	Options := moqt.ListenerOptions{
 		ListenAddr: LISTENADDR,
-		CertPath:   *CERTPATH,
-		KeyPath:    *KEYPATH,
+		CertPath:   CERTPATH,
+		KeyPath:    KEYPATH,
 		ALPNs:      ALPNS,
 		QuicConfig: quicConfig,
 	}
