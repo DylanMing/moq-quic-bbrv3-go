@@ -4,6 +4,7 @@ import (
 	"flag"
 	"io"
 	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -24,10 +25,12 @@ var ALPNS = []string{"moq-00"}
 
 var outputFile string
 var groupName string
+var algo string
 
 func init() {
 	flag.StringVar(&outputFile, "output", "received_file.bin", "Output file path")
 	flag.StringVar(&groupName, "group", "filetest", "Group name to subscribe")
+	flag.StringVar(&algo, "algo", "bbrv3", "Congestion control algorithm: cubic, bbrv1, bbrv3")
 }
 
 func main() {
@@ -49,21 +52,44 @@ func main() {
 		zerolog.SetGlobalLevel(zerolog.DebugLevel)
 	}
 
+	var congestionFunc func() quic.SendAlgorithmWithDebugInfos
+	switch algo {
+	case "cubic":
+		congestionFunc = func() quic.SendAlgorithmWithDebugInfos {
+		return quic.NewCUBICWithStats(nil, quic.DefaultStatsConfig(quic.AlgorithmCUBIC, "filesub"))
+	}
+	case "bbrv1":
+		congestionFunc = func() quic.SendAlgorithmWithDebugInfos {
+		return quic.NewBBRv1WithStats(nil, quic.DefaultStatsConfig(quic.AlgorithmBBRv1, "filesub"))
+	}
+	case "bbrv3":
+		congestionFunc = func() quic.SendAlgorithmWithDebugInfos {
+		return quic.NewBBRv3OptimizedWithStats(nil, quic.DefaultStatsConfig(quic.AlgorithmBBRv3, "filesub"))
+	}
+	default:
+		log.Error().Msgf("Unknown algorithm: %s, using bbrv3", algo)
+		congestionFunc = func() quic.SendAlgorithmWithDebugInfos {
+		return quic.NewBBRv3OptimizedWithStats(nil, quic.DefaultStatsConfig(quic.AlgorithmBBRv3, "filesub"))
+	}
+	}
+
 	Options := moqt.DialerOptions{
 		ALPNs: ALPNS,
 		QuicConfig: &quic.Config{
-			KeepAlivePeriod: 1 * time.Second,
-			EnableDatagrams: true,
-			MaxIdleTimeout:  60 * time.Second,
-			Congestion: func() quic.SendAlgorithmWithDebugInfos {
-				return quic.NewBBRv3WithStatsV2(nil, quic.DefaultStatsConfig(quic.AlgorithmBBRv3, "filesub"))
-			},
+			KeepAlivePeriod:                 1 * time.Second,
+			EnableDatagrams:                 true,
+			MaxIdleTimeout:                  60 * time.Second,
+			InitialStreamReceiveWindow:      10 * 1024 * 1024,
+			InitialConnectionReceiveWindow:  20 * 1024 * 1024,
+			MaxStreamReceiveWindow:          10 * 1024 * 1024,
+			MaxConnectionReceiveWindow:      20 * 1024 * 1024,
+			Congestion:                      congestionFunc,
 		},
 		InsecureSkipVerify: true,
 	}
 
 	sub := api.NewMOQSub(Options, RELAY)
-	log.Info().Msgf("filesub: connecting to relay...")
+	log.Info().Msgf("filesub [%s]: connecting to relay...", algo)
 
 	handler, err := sub.Connect()
 	if err != nil {
@@ -80,7 +106,7 @@ func main() {
 		handler.Subscribe(ns, "filesub", 0)
 	})
 
-	log.Info().Msgf("filesub: subscribing to '%s'", groupName)
+	log.Info().Msgf("filesub [%s]: subscribing to '%s'", algo, groupName)
 	handler.Subscribe(groupName, "filesub", 0)
 
 	<-sub.Ctx.Done()
@@ -137,39 +163,39 @@ func handleMOQStream(stream wire.MOQTStream) {
 			}
 		}
 		groupStatsMap[gid].Bytes += int64(len(object.Payload))
-		groupStatsMap[gid].Objects++
-		groupStatsMap[gid].EndTime = time.Now()
+        groupStatsMap[gid].Objects++
+        groupStatsMap[gid].EndTime = time.Now()
 
-		totalBytes += int64(len(object.Payload))
-		totalObjects++
-		statsMutex.Unlock()
+        totalBytes += int64(len(object.Payload))
+        totalObjects++
+        statsMutex.Unlock()
 
-		if object.ID == 0 || totalObjects%50 == 0 {
-			header := ""
-			if len(object.Payload) >= 30 {
-				header = string(object.Payload[:30])
-			}
-			log.Info().Msgf("Received: Group=%d, Object=%d, Size=%d, Header=%s", groupid, object.ID, len(object.Payload), header)
-		}
-	}
+        if object.ID == 0 || totalObjects%50 == 0 {
+            header := ""
+            if len(object.Payload) >= 30 {
+                header = string(object.Payload[:30])
+            }
+            log.Info().Msgf("Received: Group=%d, Object=%d, Size=%d, Header=%s", groupid, object.ID, len(object.Payload), header)
+        }
+    }
 
-	statsMutex.Lock()
-	log.Info().Msgf("Stream ended. Total: %d bytes, %d objects", totalBytes, totalObjects)
+    statsMutex.Lock()
+    log.Info().Msgf("Stream ended. Total: %d bytes, %d objects", totalBytes, totalObjects)
 
-	for gid, stats := range groupStatsMap {
-		duration := stats.EndTime.Sub(stats.StartTime)
-		throughput := float64(stats.Bytes) / 1024 / 1024 / duration.Seconds()
-		log.Info().Msgf("Group %d stats: %d bytes, %d objects, %v duration, %.2f MB/s", 
-			gid, stats.Bytes, stats.Objects, duration, throughput)
-	}
+    for gid, stats := range groupStatsMap {
+        duration := stats.EndTime.Sub(stats.StartTime)
+        throughput := float64(stats.Bytes) / 1024 / 1024 / duration.Seconds()
+        log.Info().Msgf("Group %d stats: %d bytes, %d objects, %v duration, %.2f MB/s", 
+            gid, stats.Bytes, stats.Objects, duration, throughput)
+    }
 
-	totalDuration := time.Since(startTime)
-	avgThroughput := float64(totalBytes) / 1024 / 1024 / totalDuration.Seconds()
-	log.Info().Msgf("=== TRANSFER COMPLETE ===")
-	log.Info().Msgf("Total received: %d bytes (%.2f MB)", totalBytes, float64(totalBytes)/1024/1024)
-	log.Info().Msgf("Total duration: %v", totalDuration)
-	log.Info().Msgf("Average throughput: %.2f MB/s", avgThroughput)
-	log.Info().Msgf("Total objects: %d", totalObjects)
-	log.Info().Msgf("Total groups: %d", len(groupStatsMap))
-	statsMutex.Unlock()
+    totalDuration := time.Since(startTime)
+    avgThroughput := float64(totalBytes) / 1024 / 1024 / totalDuration.Seconds()
+    log.Info().Msgf("=== TRANSFER COMPLETE [%s] ===", algo)
+    log.Info().Msgf("Total received: %d bytes (%.2f MB)", totalBytes, float64(totalBytes)/1024/1024)
+    log.Info().Msgf("Total duration: %v", totalDuration)
+    log.Info().Msgf("Average throughput: %.2f MB/s", avgThroughput)
+    log.Info().Msgf("Total objects: %d", totalObjects)
+    log.Info().Msgf("Total groups: %d", len(groupStatsMap))
+    statsMutex.Unlock()
 }

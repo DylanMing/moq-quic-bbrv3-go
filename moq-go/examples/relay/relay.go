@@ -52,10 +52,14 @@ func main() {
 	}
 
 	quicConfig := &quic.Config{
-		EnableDatagrams: true,
+		EnableDatagrams:                 true,
+		InitialStreamReceiveWindow:      10 * 1024 * 1024,
+		InitialConnectionReceiveWindow:  20 * 1024 * 1024,
+		MaxStreamReceiveWindow:          10 * 1024 * 1024,
+		MaxConnectionReceiveWindow:      20 * 1024 * 1024,
 		Congestion: func() quic.SendAlgorithmWithDebugInfos {
-        return quic.NewBBRv3WithStatsV2(nil, quic.DefaultStatsConfig(quic.AlgorithmBBRv3, "relay"))
-    },
+			return quic.NewBBRv3OptimizedWithStats(nil, quic.DefaultStatsConfig(quic.AlgorithmBBRv3, "relay"))
+		},
 	}
 
 	Options := moqt.ListenerOptions{

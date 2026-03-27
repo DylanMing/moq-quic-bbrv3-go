@@ -303,3 +303,13 @@ func NewBBRv3WithStatsV2(conf *Config, statsConfig StatsConfig) SendAlgorithmWit
 	conf = populateConfig(conf)
 	return congestion.NewBBRv3SenderWithStats(protocol.ByteCount(conf.InitialPacketSize), statsConfig)
 }
+
+func NewBBRv3Optimized(conf *Config) SendAlgorithmWithDebugInfos {
+	conf = populateConfig(conf)
+	return congestion.NewBBRv3SenderOptimized(protocol.ByteCount(conf.InitialPacketSize))
+}
+
+func NewBBRv3OptimizedWithStats(conf *Config, statsConfig StatsConfig) SendAlgorithmWithStats {
+	conf = populateConfig(conf)
+	return congestion.NewBBRv3SenderOptimizedWithStats(protocol.ByteCount(conf.InitialPacketSize), statsConfig)
+}

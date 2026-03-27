@@ -117,9 +117,13 @@ func (gs *GroupStream) GetHeaderSubIDBytes(subid uint64) []byte {
 func (gs *GroupStream) Pipe(index int, stream *quic.SendStream) (int, error) {
 
 	gs.ObjectCond.L.Lock()
-	gs.ObjectCond.Wait()
+	
+	for len(gs.ObjectsArr) <= index && !gs.IsEOF {
+		gs.ObjectCond.Wait()
+	}
 
 	length := len(gs.ObjectsArr)
+	isEOF := gs.IsEOF
 
 	var data []byte
 
@@ -131,11 +135,13 @@ func (gs *GroupStream) Pipe(index int, stream *quic.SendStream) (int, error) {
 
 	gs.ObjectCond.L.Unlock()
 
-	if _, err := stream.Write(data); err != nil {
-		return index, err
+	if len(data) > 0 {
+		if _, err := stream.Write(data); err != nil {
+			return index, err
+		}
 	}
 
-	if gs.IsEOF == true {
+	if isEOF && index >= length {
 		return index, io.EOF
 	}
 

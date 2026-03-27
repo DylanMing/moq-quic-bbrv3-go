@@ -216,3 +216,58 @@ func (s *BBRv3SenderWithStats) getBBRv3State() string {
 	}
 	return "ProbeBW"
 }
+
+type BBRv3SenderOptimizedWithStats struct {
+	*BBRv3SenderOptimized
+	stats StatsCollector
+}
+
+func NewBBRv3SenderOptimizedWithStats(initialMaxDatagramSize protocol.ByteCount, config StatsConfig) *BBRv3SenderOptimizedWithStats {
+	config.Algorithm = AlgorithmBBRv3
+	return &BBRv3SenderOptimizedWithStats{
+		BBRv3SenderOptimized: NewBBRv3SenderOptimized(initialMaxDatagramSize),
+		stats:                NewStatsCollector(config),
+	}
+}
+
+func (s *BBRv3SenderOptimizedWithStats) GetStatsCollector() StatsCollector {
+	return s.stats
+}
+
+func (s *BBRv3SenderOptimizedWithStats) OnPacketSent(sentTime monotime.Time, bytesInFlight protocol.ByteCount, packetNumber protocol.PacketNumber, bytes protocol.ByteCount, isRetransmittable bool) {
+	if isRetransmittable {
+		s.stats.AddBytesSent(uint64(bytes))
+	}
+	s.BBRv3SenderOptimized.OnPacketSent(sentTime, bytesInFlight, packetNumber, bytes, isRetransmittable)
+}
+
+func (s *BBRv3SenderOptimizedWithStats) OnPacketAcked(number protocol.PacketNumber, ackedBytes protocol.ByteCount, priorInFlight protocol.ByteCount, eventTime monotime.Time) {
+	s.BBRv3SenderOptimized.OnPacketAcked(number, ackedBytes, priorInFlight, eventTime)
+
+	s.stats.UpdateCWND(uint64(s.BBRv3SenderOptimized.GetCongestionWindow()))
+	s.stats.UpdateInflight(uint64(priorInFlight))
+	s.stats.UpdateState(s.getBBRv3OptimizedState())
+	s.stats.UpdateBandwidth(s.BBRv3SenderOptimized.bw)
+	s.stats.UpdateMaxBandwidth(s.BBRv3SenderOptimized.maxBw)
+	s.stats.UpdatePacingRate(s.BBRv3SenderOptimized.pacingRate)
+
+	if s.stats.ShouldLog() {
+		s.stats.Log()
+	}
+}
+
+func (s *BBRv3SenderOptimizedWithStats) OnCongestionEvent(number protocol.PacketNumber, lostBytes protocol.ByteCount, priorInFlight protocol.ByteCount) {
+	s.stats.AddBytesLost(uint64(lostBytes))
+	s.stats.IncrementRetransmit()
+	s.BBRv3SenderOptimized.OnCongestionEvent(number, lostBytes, priorInFlight)
+}
+
+func (s *BBRv3SenderOptimizedWithStats) getBBRv3OptimizedState() string {
+	if s.BBRv3SenderOptimized.InSlowStart() {
+		return "Startup"
+	}
+	if s.BBRv3SenderOptimized.InRecovery() {
+		return "Recovery"
+	}
+	return "ProbeBW"
+}

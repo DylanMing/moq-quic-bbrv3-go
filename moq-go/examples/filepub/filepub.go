@@ -26,10 +26,12 @@ var ALPNS = []string{"moq-00"}
 
 var groupSize int
 var groupName string
+var algo string
 
 func init() {
 	flag.IntVar(&groupSize, "groupsize", 10*1024*1024, "Group size in bytes (default 10MB)")
 	flag.StringVar(&groupName, "group", "filetest", "Group name for tracking")
+	flag.StringVar(&algo, "algo", "bbrv3", "Congestion control algorithm: cubic, bbrv1, bbrv3")
 }
 
 func main() {
@@ -51,21 +53,44 @@ func main() {
 		zerolog.SetGlobalLevel(zerolog.DebugLevel)
 	}
 
+	var congestionFunc func() quic.SendAlgorithmWithDebugInfos
+	switch algo {
+	case "cubic":
+		congestionFunc = func() quic.SendAlgorithmWithDebugInfos {
+			return quic.NewCUBICWithStats(nil, quic.DefaultStatsConfig(quic.AlgorithmCUBIC, "filepub"))
+		}
+	case "bbrv1":
+		congestionFunc = func() quic.SendAlgorithmWithDebugInfos {
+			return quic.NewBBRv1WithStats(nil, quic.DefaultStatsConfig(quic.AlgorithmBBRv1, "filepub"))
+		}
+	case "bbrv3":
+		congestionFunc = func() quic.SendAlgorithmWithDebugInfos {
+			return quic.NewBBRv3OptimizedWithStats(nil, quic.DefaultStatsConfig(quic.AlgorithmBBRv3, "filepub"))
+		}
+	default:
+		log.Error().Msgf("Unknown algorithm: %s, using bbrv3", algo)
+		congestionFunc = func() quic.SendAlgorithmWithDebugInfos {
+			return quic.NewBBRv3OptimizedWithStats(nil, quic.DefaultStatsConfig(quic.AlgorithmBBRv3, "filepub"))
+		}
+	}
+
 	Options := moqt.DialerOptions{
 		ALPNs: ALPNS,
 		QuicConfig: &quic.Config{
-			KeepAlivePeriod: 1 * time.Second,
-			EnableDatagrams: true,
-			MaxIdleTimeout:  60 * time.Second,
-			Congestion: func() quic.SendAlgorithmWithDebugInfos {
-				return quic.NewBBRv3WithStatsV2(nil, quic.DefaultStatsConfig(quic.AlgorithmBBRv3, "filepub"))
-			},
+			KeepAlivePeriod:                 1 * time.Second,
+			EnableDatagrams:                 true,
+			MaxIdleTimeout:                  60 * time.Second,
+			InitialStreamReceiveWindow:      10 * 1024 * 1024,
+			InitialConnectionReceiveWindow:  20 * 1024 * 1024,
+			MaxStreamReceiveWindow:          10 * 1024 * 1024,
+			MaxConnectionReceiveWindow:      20 * 1024 * 1024,
+			Congestion:                      congestionFunc,
 		},
 		InsecureSkipVerify: true,
 	}
 
 	pub := api.NewMOQPub(Options, RELAY)
-	log.Info().Msgf("filepub: connecting to relay...")
+	log.Info().Msgf("filepub [%s]: connecting to relay...", algo)
 	handler, err := pub.Connect()
 	if err != nil {
 		log.Error().Msgf("error - %s", err)
@@ -77,7 +102,7 @@ func main() {
 		go handleFileStream(&ps)
 	})
 
-	log.Info().Msgf("filepub: sending announce for 'filetest'")
+	log.Info().Msgf("filepub [%s]: sending announce for 'filetest'", algo)
 	handler.SendAnnounce("filetest")
 
 	numGroups := FILE_SIZE / groupSize
@@ -89,8 +114,8 @@ func main() {
 		objectsPerGroup++
 	}
 
-	log.Info().Msgf("Transfer config: FileSize=%dMB, GroupSize=%.2fMB, Groups=%d, ObjectsPerGroup=%d, ObjectSize=%dKB",
-		FILE_SIZE/1024/1024, float64(groupSize)/1024/1024, numGroups, objectsPerGroup, OBJECT_SIZE/1024)
+	log.Info().Msgf("Transfer config [algo=%s]: FileSize=%dMB, GroupSize=%.2fMB, Groups=%d, ObjectsPerGroup=%d, ObjectSize=%dKB",
+		algo, FILE_SIZE/1024/1024, float64(groupSize)/1024/1024, numGroups, objectsPerGroup, OBJECT_SIZE/1024)
 
 	<-pub.Ctx.Done()
 }
@@ -142,6 +167,8 @@ func handleFileStream(stream *moqt.PubStream) {
 				Payload: payload,
 			})
 
+			time.Sleep(3 * time.Millisecond)
+
 			bytesSent += objSize
 			groupBytes += objSize
 			objectid++
@@ -156,5 +183,5 @@ func handleFileStream(stream *moqt.PubStream) {
 
 	totalDuration := time.Since(startTime)
 	avgThroughput := float64(bytesSent) / 1024 / 1024 / totalDuration.Seconds()
-	log.Info().Msgf("Transfer complete: %d bytes in %v (%.2f MB/s avg)", bytesSent, totalDuration, avgThroughput)
+	log.Info().Msgf("Transfer complete [%s]: %d bytes in %v (%.2f MB/s avg)", algo, bytesSent, totalDuration, avgThroughput)
 }
