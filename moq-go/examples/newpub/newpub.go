@@ -50,9 +50,7 @@ func main() {
           KeepAlivePeriod: 1 * time.Second,
           EnableDatagrams: true,
           MaxIdleTimeout:  60 * time.Second,
-          Congestion: func() quic.SendAlgorithmWithDebugInfos {
-             return quic.NewBBRv3(nil)
-          },
+          Congestion: nil,
        },
        InsecureSkipVerify: true,
     }

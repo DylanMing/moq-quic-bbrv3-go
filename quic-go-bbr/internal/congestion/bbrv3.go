@@ -252,6 +252,16 @@ type BBRv3Sender struct {
 	// Last min RTT tracking (from bbrv1)
 	lastNewMinRTT     time.Duration
 	lastNewMinRTTTime monotime.Time
+
+	// Statistics collection
+	stats *BBRv3Stats
+
+	// Total bytes sent for statistics
+	totalBytesSent uint64
+	// Total bytes lost for statistics
+	totalBytesLost uint64
+	// Retransmission count
+	retransmitCount uint64
 }
 
 // NewBBRv3Sender creates a new BBRv3 sender
@@ -315,6 +325,23 @@ func NewBBRv3Sender(initialMaxDatagramSize protocol.ByteCount) *BBRv3Sender {
 
 	s.init()
 	return s
+}
+
+// EnableStats enables statistics collection with the given configuration
+func (b *BBRv3Sender) EnableStats(config BBRv3StatsConfig) {
+	b.stats = NewBBRv3Stats(config)
+}
+
+// DisableStats disables statistics collection
+func (b *BBRv3Sender) DisableStats() {
+	if b.stats != nil {
+		b.stats.SetEnabled(false)
+	}
+}
+
+// GetStats returns the current statistics snapshot
+func (b *BBRv3Sender) GetStats() *BBRv3Stats {
+	return b.stats
 }
 
 func (b *BBRv3Sender) init() {
@@ -1017,6 +1044,14 @@ func (b *BBRv3Sender) exitProbeRTTFromAbove(now monotime.Time) {
 func (b *BBRv3Sender) OnPacketSent(sentTime monotime.Time, bytesInFlight protocol.ByteCount, packetNumber protocol.PacketNumber, bytes protocol.ByteCount, isRetransmittable bool) {
 	b.sentTimes[packetNumber] = sentTime
 
+	// Update statistics
+	if isRetransmittable {
+		b.totalBytesSent += uint64(bytes)
+		if b.stats != nil {
+			b.stats.AddBytesSent(uint64(bytes))
+		}
+	}
+
 	if b.pacingRate > 0 {
 		timePerByte := float64(time.Second) / (float64(b.pacingRate) * b.pacingGain)
 		b.nextSendTime = sentTime.Add(time.Duration(float64(bytes) * timePerByte))
@@ -1047,6 +1082,11 @@ func (b *BBRv3Sender) OnPacketAcked(number protocol.PacketNumber, ackedBytes pro
 
 	rtt := time.Duration(eventTime - sentTime)
 
+	// Update statistics for RTT
+	if b.stats != nil {
+		b.stats.UpdateRTT(rtt)
+	}
+
 	// Update min RTT (from bbrv1 style)
 	if rtt > 0 && (b.lastNewMinRTT <= 0 || rtt < b.lastNewMinRTT) {
 		b.lastNewMinRTT = rtt
@@ -1072,6 +1112,7 @@ func (b *BBRv3Sender) OnPacketAcked(number protocol.PacketNumber, ackedBytes pro
 	b.maybeExitProbeRTT(eventTime)
 
 	if b.state == bbrv3StateProbeRTT {
+		b.updateAndLogStats()
 		return
 	}
 
@@ -1113,6 +1154,9 @@ func (b *BBRv3Sender) OnPacketAcked(number protocol.PacketNumber, ackedBytes pro
 			b.probeRttDoneStamp = eventTime
 		}
 	}
+
+	// Update and log statistics periodically
+	b.updateAndLogStats()
 }
 
 func (b *BBRv3Sender) calculateDeliveryRate(eventTime monotime.Time) uint64 {
@@ -1145,6 +1189,14 @@ func (b *BBRv3Sender) updateMaxBwFilter() {
 
 // OnCongestionEvent is called when there's a congestion event (packet loss)
 func (b *BBRv3Sender) OnCongestionEvent(number protocol.PacketNumber, lostBytes protocol.ByteCount, priorInFlight protocol.ByteCount) {
+	// Update statistics for lost bytes
+	b.totalBytesLost += uint64(lostBytes)
+	b.retransmitCount++
+	if b.stats != nil {
+		b.stats.AddBytesLost(uint64(lostBytes))
+		b.stats.IncrementRetransmit()
+	}
+
 	if !b.inRecoveryMode && b.state != bbrv3StateStartup && b.state != bbrv3StateProbeRTT {
 		b.inRecoveryMode = true
 		b.pacingGain = 1.0
@@ -1189,4 +1241,43 @@ func (b *BBRv3Sender) InRecovery() bool {
 // InSlowStart returns whether we're in slow start
 func (b *BBRv3Sender) InSlowStart() bool {
 	return b.state == bbrv3StateStartup
+}
+
+// updateAndLogStats updates and logs statistics periodically
+func (b *BBRv3Sender) updateAndLogStats() {
+	if b.stats == nil {
+		return
+	}
+
+	// Update all statistics
+	stateStr := "Unknown"
+	switch b.state {
+	case bbrv3StateStartup:
+		stateStr = "Startup"
+	case bbrv3StateDrain:
+		stateStr = "Drain"
+	case bbrv3StateProbeBwDown:
+		stateStr = "ProbeBW-Down"
+	case bbrv3StateProbeBwCruise:
+		stateStr = "ProbeBW-Cruise"
+	case bbrv3StateProbeBwRefill:
+		stateStr = "ProbeBW-Refill"
+	case bbrv3StateProbeBwUp:
+		stateStr = "ProbeBW-Up"
+	case bbrv3StateProbeRTT:
+		stateStr = "ProbeRTT"
+	}
+
+	b.stats.UpdateCWND(b.cwnd)
+	b.stats.UpdateSSThresh(b.config.minCwnd)
+	b.stats.UpdateTransmissionRate(b.pacingRate)
+	b.stats.UpdateState(stateStr)
+	b.stats.UpdatePacingRate(b.pacingRate)
+	b.stats.UpdateBandwidth(b.bw)
+	b.stats.UpdateMaxBandwidth(b.maxBw)
+
+	// Log if it's time
+	if b.stats.ShouldLog() {
+		b.stats.Log()
+	}
 }

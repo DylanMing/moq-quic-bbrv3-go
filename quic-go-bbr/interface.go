@@ -256,3 +256,50 @@ func NewBBRv3(conf *Config) SendAlgorithmWithDebugInfos {
 	conf = populateConfig(conf)
 	return congestion.NewBBRv3Sender(protocol.ByteCount(conf.InitialPacketSize))
 }
+
+type BBRv3StatsConfig = congestion.BBRv3StatsConfig
+
+func NewBBRv3WithStats(conf *Config, statsConfig BBRv3StatsConfig) SendAlgorithmWithDebugInfos {
+	conf = populateConfig(conf)
+	sender := congestion.NewBBRv3Sender(protocol.ByteCount(conf.InitialPacketSize))
+	sender.EnableStats(statsConfig)
+	return sender
+}
+
+type (
+	CongestionAlgorithm  = congestion.CongestionAlgorithm
+	StatsConfig          = congestion.StatsConfig
+	StatsSnapshot        = congestion.StatsSnapshot
+	StatsCollector       = congestion.StatsCollector
+	SendAlgorithmWithStats = congestion.SendAlgorithmWithStats
+)
+
+const (
+	AlgorithmCUBIC = congestion.AlgorithmCUBIC
+	AlgorithmBBRv1 = congestion.AlgorithmBBRv1
+	AlgorithmBBRv3 = congestion.AlgorithmBBRv3
+)
+
+func DefaultStatsConfig(algorithm CongestionAlgorithm, connID string) StatsConfig {
+	return congestion.DefaultStatsConfig(algorithm, connID)
+}
+
+func JSONStatsConfig(algorithm CongestionAlgorithm, connID string, callback func(StatsSnapshot)) StatsConfig {
+	return congestion.JSONStatsConfig(algorithm, connID, callback)
+}
+
+func NewCUBICWithStats(conf *Config, statsConfig StatsConfig) SendAlgorithmWithStats {
+	conf = populateConfig(conf)
+	statsConfig.Algorithm = AlgorithmCUBIC
+	return nil
+}
+
+func NewBBRv1WithStats(conf *Config, statsConfig StatsConfig) SendAlgorithmWithStats {
+	conf = populateConfig(conf)
+	return congestion.NewBBRv1SenderWithStats(protocol.ByteCount(conf.InitialPacketSize), statsConfig)
+}
+
+func NewBBRv3WithStatsV2(conf *Config, statsConfig StatsConfig) SendAlgorithmWithStats {
+	conf = populateConfig(conf)
+	return congestion.NewBBRv3SenderWithStats(protocol.ByteCount(conf.InitialPacketSize), statsConfig)
+}
