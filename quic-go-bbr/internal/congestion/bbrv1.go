@@ -238,3 +238,34 @@ func (b *BBRv1Sender) InRecovery() bool {
 func (b *BBRv1Sender) InSlowStart() bool {
 	return b.state == STARTUP
 }
+
+func (b *BBRv1Sender) GetStats(bytesInFlight protocol.ByteCount) BBRv3Stats {
+	stateStr := "Unknown"
+	switch b.state {
+	case STARTUP:
+		stateStr = "Startup"
+	case DRAIN:
+		stateStr = "Drain"
+	case PROBE_BW:
+		stateStr = "ProbeBW"
+	case PROBE_RTT:
+		stateStr = "ProbeRTT"
+	}
+	return BBRv3Stats{
+		CongestionWindow: uint64(b.cwnd()),
+		PacingRate:       uint64(float64(b.maxBandwidth) * b.pacing_gain),
+		BytesInFlight:    uint64(bytesInFlight),
+		TotalBytesSent:   0,
+		TotalBytesLost:   0,
+		MinRTT:          b.lastNewMinRTT,
+		MaxRTT:          0,
+		LastRTT:         b.lastNewMinRTT,
+		SmoothedRTT:     b.lastNewMinRTT,
+		PacingGain:       b.pacing_gain,
+		CwndGain:         b.cwnd_gain,
+		State:            stateStr,
+		InRecovery:       b.inRecovery,
+		InSlowStart:      b.state == STARTUP,
+		MaxBandwidth:     uint64(b.maxBandwidth),
+	}
+}

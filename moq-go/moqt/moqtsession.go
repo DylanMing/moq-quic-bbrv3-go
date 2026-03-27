@@ -31,6 +31,7 @@ const (
 
 type MOQTSession struct {
 	Conn          MOQTConnection
+	QuicConn      *quic.Conn
 	CS            *ControlStream
 	ctx           context.Context
 	Id            string
@@ -69,6 +70,20 @@ func CreateMOQSession(conn MOQTConnection, LocalRole uint64, mode uint8) (*MOQTS
 
 func (s *MOQTSession) isUpstream() bool {
 	return s.RemoteRole == wire.ROLE_PUBLISHER || s.RemoteRole == wire.ROLE_RELAY
+}
+
+func (s *MOQTSession) GetConnectionStats() ConnectionStats {
+	if s.QuicConn != nil {
+		stats := s.QuicConn.ConnectionStats()
+		return ConnectionStats{
+			MinRTT:      stats.MinRTT,
+			LatestRTT:   stats.LatestRTT,
+			SmoothedRTT: stats.SmoothedRTT,
+			PacketsSent: stats.PacketsSent,
+			PacketsLost: stats.PacketsLost,
+		}
+	}
+	return ConnectionStats{}
 }
 
 func (s *MOQTSession) Close(code uint64, msg string) {

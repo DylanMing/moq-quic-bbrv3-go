@@ -2,6 +2,7 @@ package congestion
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/quic-go/quic-go/internal/monotime"
 	"github.com/quic-go/quic-go/internal/protocol"
@@ -84,6 +85,19 @@ func NewCubicSender(
 		initialCongestionWindow*initialMaxDatagramSize,
 		protocol.MaxCongestionWindowPackets*initialMaxDatagramSize,
 		qlogger,
+	)
+}
+
+func NewCubicSenderWithDefaults() *CubicSender {
+	return newCubicSender(
+		DefaultClock{},
+		nil,
+		nil,
+		false,
+		protocol.InitialPacketSize,
+		initialCongestionWindow*protocol.InitialPacketSize,
+		protocol.MaxCongestionWindowPackets*protocol.InitialPacketSize,
+		nil,
 	)
 }
 
@@ -172,11 +186,16 @@ func (c *CubicSender) GetCongestionWindow() protocol.ByteCount {
 }
 
 func (c *CubicSender) MaybeExitSlowStart() {
-	if c.InSlowStart() &&
-		c.hybridSlowStart.ShouldExitSlowStart(c.rttStats.LatestRTT(), c.rttStats.MinRTT(), c.GetCongestionWindow()/c.maxDatagramSize) {
-		// exit slow start
-		c.slowStartThreshold = c.congestionWindow
-		c.maybeQlogStateChange(qlog.CongestionStateCongestionAvoidance)
+	if c.InSlowStart() {
+		var latestRTT, minRTT time.Duration
+		if c.rttStats != nil {
+			latestRTT = c.rttStats.LatestRTT()
+			minRTT = c.rttStats.MinRTT()
+		}
+		if c.hybridSlowStart.ShouldExitSlowStart(latestRTT, minRTT, c.GetCongestionWindow()/c.maxDatagramSize) {
+			c.slowStartThreshold = c.congestionWindow
+			c.maybeQlogStateChange(qlog.CongestionStateCongestionAvoidance)
+		}
 	}
 }
 
@@ -257,9 +276,13 @@ func (c *CubicSender) maybeIncreaseCwnd(
 			c.numAckedPackets = 0
 		}
 	} else {
+		minRTT := time.Duration(0)
+		if c.rttStats != nil {
+			minRTT = c.rttStats.MinRTT()
+		}
 		c.congestionWindow = min(
 			c.maxCongestionWindow(),
-			c.cubic.CongestionWindowAfterAck(ackedBytes, c.congestionWindow, c.rttStats.MinRTT(), eventTime),
+			c.cubic.CongestionWindowAfterAck(ackedBytes, c.congestionWindow, minRTT, eventTime),
 		)
 	}
 }
@@ -276,9 +299,11 @@ func (c *CubicSender) isCwndLimited(bytesInFlight protocol.ByteCount) bool {
 
 // BandwidthEstimate returns the current bandwidth estimate
 func (c *CubicSender) BandwidthEstimate() Bandwidth {
-	srtt := c.rttStats.SmoothedRTT()
+	var srtt time.Duration
+	if c.rttStats != nil {
+		srtt = c.rttStats.SmoothedRTT()
+	}
 	if srtt == 0 {
-		// This should never happen, but if it does, avoid division by zero.
 		srtt = protocol.TimerGranularity
 	}
 	return BandwidthFromDelta(c.GetCongestionWindow(), srtt)
@@ -327,4 +352,43 @@ func (c *CubicSender) SetMaxDatagramSize(s protocol.ByteCount) {
 		c.congestionWindow = c.minCongestionWindow()
 	}
 	c.pacer.SetMaxDatagramSize(s)
+}
+
+func (c *CubicSender) GetStats(bytesInFlight protocol.ByteCount) BBRv3Stats {
+	var stateStr string
+	if c.InSlowStart() {
+		stateStr = "SlowStart"
+	} else if c.InRecovery() {
+		stateStr = "Recovery"
+	} else {
+		stateStr = "CongestionAvoidance"
+	}
+	var minRTT, latestRTT, smoothedRTT time.Duration
+	var bytesSent, bytesLost uint64
+	if c.rttStats != nil {
+		minRTT = c.rttStats.MinRTT()
+		latestRTT = c.rttStats.LatestRTT()
+		smoothedRTT = c.rttStats.SmoothedRTT()
+	}
+	if c.connStats != nil {
+		bytesSent = uint64(c.connStats.BytesSent.Load())
+		bytesLost = uint64(c.connStats.BytesLost.Load())
+	}
+	return BBRv3Stats{
+		CongestionWindow: uint64(c.congestionWindow),
+		PacingRate:       0,
+		BytesInFlight:    uint64(bytesInFlight),
+		TotalBytesSent:   bytesSent,
+		TotalBytesLost:   bytesLost,
+		MinRTT:          minRTT,
+		MaxRTT:          0,
+		LastRTT:         latestRTT,
+		SmoothedRTT:     smoothedRTT,
+		PacingGain:       0,
+		CwndGain:         0,
+		State:            stateStr,
+		InRecovery:       c.InRecovery(),
+		InSlowStart:      c.InSlowStart(),
+		MaxBandwidth:     0,
+	}
 }

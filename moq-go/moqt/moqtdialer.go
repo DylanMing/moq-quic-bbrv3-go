@@ -25,7 +25,6 @@ func (d *MOQTDialer) Dial(addr string) (*MOQTSession, error) {
 
 	Options := d.Options
 
-	// 使用默认的 BBRv3 配置
 	quicConfig := Options.QuicConfig
 	if quicConfig == nil {
 		quicConfig = &quic.Config{
@@ -51,6 +50,8 @@ func (d *MOQTDialer) Dial(addr string) (*MOQTSession, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	session.QuicConn = conn
 
 	session.ServeMOQ()
 

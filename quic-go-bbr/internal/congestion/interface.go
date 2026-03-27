@@ -1,6 +1,8 @@
 package congestion
 
 import (
+	"time"
+
 	"github.com/quic-go/quic-go/internal/monotime"
 	"github.com/quic-go/quic-go/internal/protocol"
 )
@@ -24,4 +26,24 @@ type SendAlgorithmWithDebugInfos interface {
 	InSlowStart() bool
 	InRecovery() bool
 	GetCongestionWindow() protocol.ByteCount
+	GetStats(bytesInFlight protocol.ByteCount) BBRv3Stats
+}
+
+// BBRv3Stats holds statistics for BBRv3
+type BBRv3Stats struct {
+	CongestionWindow uint64
+	PacingRate      uint64
+	BytesInFlight   uint64
+	TotalBytesSent  uint64
+	TotalBytesLost  uint64
+	MinRTT          time.Duration
+	MaxRTT          time.Duration
+	LastRTT         time.Duration
+	SmoothedRTT     time.Duration
+	PacingGain      float64
+	CwndGain        float64
+	State           string
+	InRecovery      bool
+	InSlowStart     bool
+	MaxBandwidth    uint64
 }

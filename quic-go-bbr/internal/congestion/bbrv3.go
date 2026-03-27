@@ -252,6 +252,12 @@ type BBRv3Sender struct {
 	// Last min RTT tracking (from bbrv1)
 	lastNewMinRTT     time.Duration
 	lastNewMinRTTTime monotime.Time
+
+	// Stats tracking
+	totalBytesSent uint64
+	totalBytesLost uint64
+	lastRTT        time.Duration
+	smoothedRTT    time.Duration
 }
 
 // NewBBRv3Sender creates a new BBRv3 sender
@@ -1011,6 +1017,7 @@ func (b *BBRv3Sender) exitProbeRTTFromAbove(now monotime.Time) {
 // OnPacketSent is called when a packet is sent
 func (b *BBRv3Sender) OnPacketSent(sentTime monotime.Time, bytesInFlight protocol.ByteCount, packetNumber protocol.PacketNumber, bytes protocol.ByteCount, isRetransmittable bool) {
 	b.sentTimes[packetNumber] = sentTime
+	b.totalBytesSent += uint64(bytes)
 
 	if b.pacingRate > 0 {
 		timePerByte := float64(time.Second) / (float64(b.pacingRate) * b.pacingGain)
@@ -1140,6 +1147,7 @@ func (b *BBRv3Sender) updateMaxBwFilter() {
 
 // OnCongestionEvent is called when there's a congestion event (packet loss)
 func (b *BBRv3Sender) OnCongestionEvent(number protocol.PacketNumber, lostBytes protocol.ByteCount, priorInFlight protocol.ByteCount) {
+	b.totalBytesLost += uint64(lostBytes)
 	if !b.inRecoveryMode && b.state != bbrv3StateStartup && b.state != bbrv3StateProbeRTT {
 		b.inRecoveryMode = true
 		b.pacingGain = 1.0
@@ -1184,4 +1192,45 @@ func (b *BBRv3Sender) InRecovery() bool {
 // InSlowStart returns whether we're in slow start
 func (b *BBRv3Sender) InSlowStart() bool {
 	return b.state == bbrv3StateStartup
+}
+
+func (b *BBRv3Sender) stateString() string {
+	switch b.state {
+	case bbrv3StateStartup:
+		return "Startup"
+	case bbrv3StateDrain:
+		return "Drain"
+	case bbrv3StateProbeBwDown:
+		return "ProbeBW_Down"
+	case bbrv3StateProbeBwCruise:
+		return "ProbeBW_Cruise"
+	case bbrv3StateProbeBwRefill:
+		return "ProbeBW_Refill"
+	case bbrv3StateProbeBwUp:
+		return "ProbeBW_Up"
+	case bbrv3StateProbeRTT:
+		return "ProbeRTT"
+	}
+	return "Unknown"
+}
+
+func (b *BBRv3Sender) GetStats(bytesInFlight protocol.ByteCount) BBRv3Stats {
+	b.smoothedRTT = b.lastNewMinRTT
+	return BBRv3Stats{
+		CongestionWindow: b.cwnd,
+		PacingRate:       b.pacingRate,
+		BytesInFlight:    uint64(bytesInFlight),
+		TotalBytesSent:   b.totalBytesSent,
+		TotalBytesLost:   b.totalBytesLost,
+		MinRTT:           b.minRtt,
+		MaxRTT:           b.probeRttMinDelay,
+		LastRTT:          b.lastRTT,
+		SmoothedRTT:      b.smoothedRTT,
+		PacingGain:       b.pacingGain,
+		CwndGain:         b.cwndGain,
+		State:            b.stateString(),
+		InRecovery:       b.inRecoveryMode,
+		InSlowStart:      b.state == bbrv3StateStartup,
+		MaxBandwidth:     b.maxBw,
+	}
 }

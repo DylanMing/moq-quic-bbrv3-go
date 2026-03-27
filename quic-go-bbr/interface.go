@@ -241,6 +241,7 @@ type SendAlgorithmWithDebugInfos interface {
 	InSlowStart() bool
 	InRecovery() bool
 	GetCongestionWindow() ByteCount
+	GetStats(bytesInFlight ByteCount) congestion.BBRv3Stats
 }
 
 func NewTime() monotime.Time {
@@ -255,4 +256,8 @@ func NewBBRv1(conf *Config) SendAlgorithmWithDebugInfos {
 func NewBBRv3(conf *Config) SendAlgorithmWithDebugInfos {
 	conf = populateConfig(conf)
 	return congestion.NewBBRv3Sender(protocol.ByteCount(conf.InitialPacketSize))
+}
+
+func NewCubic(conf *Config) SendAlgorithmWithDebugInfos {
+	return congestion.NewCubicSenderWithDefaults()
 }

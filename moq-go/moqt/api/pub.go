@@ -12,6 +12,7 @@ type MOQPub struct {
 	Ctx                context.Context
 	Relay              string
 	handler            *moqt.PubHandler
+	session            *moqt.MOQTSession
 	onSubscribeHandler func(moqt.PubStream)
 }
 
@@ -43,6 +44,7 @@ func (pub *MOQPub) Connect() (*moqt.PubHandler, error) {
 		return nil, err
 	}
 
+	pub.session = session
 	pub.handler = session.PubHandler()
 
 	go func() {
@@ -52,4 +54,11 @@ func (pub *MOQPub) Connect() (*moqt.PubHandler, error) {
 	}()
 
 	return session.PubHandler(), nil
+}
+
+func (pub *MOQPub) GetConnectionStats() moqt.ConnectionStats {
+	if pub.session != nil {
+		return pub.session.GetConnectionStats()
+	}
+	return moqt.ConnectionStats{}
 }
